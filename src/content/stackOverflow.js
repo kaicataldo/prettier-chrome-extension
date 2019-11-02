@@ -9,13 +9,10 @@ export default class StackOverflow {
   }
 
   _init() {
-    this._initStackOverflowButton();
-
-    const pageObserver = new MutationObserver(() => {
-      this._initStackOverflowButton();
-    });
-
+    this._renderButton();
+    const pageObserver = new MutationObserver(() => this._renderButton());
     const content = document.querySelector("#content");
+
     if (content) {
       pageObserver.observe(content, {
         childList: true,
@@ -24,14 +21,11 @@ export default class StackOverflow {
     }
   }
 
-  _initStackOverflowButton() {
-    const buttonRow = document.querySelector(".wmd-button-row");
-    if (buttonRow) {
-      this._renderStackOverflowButton();
+  _renderButton() {
+    if (!document.querySelector(".wmd-button-row")) {
+      return;
     }
-  }
 
-  _renderStackOverflowButton() {
     const inputEl = document.querySelector(".wmd-input");
     const buttonRowEl = document.querySelector(".wmd-button-row");
 

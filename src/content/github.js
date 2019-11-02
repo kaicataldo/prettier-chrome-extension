@@ -3,101 +3,114 @@ import { PRETTIER_PLUGINS } from "./parsers";
 import { findWithClass } from "./utils";
 import prettier from "prettier/standalone";
 
-const GITHUB_VALID_PATHNAMES = /^\/.*\/.*\/(?:pull\/\d+(?:\/?|\/files\/?)$|commit|compare\/.*|issues\/\d+|issues\/new)/u;
-const JS_DIFF_CONTAINER_CLASS = ".js-diff-progressive-container";
-const COMMENT_TIMELINE_GROUP_CLASS = ".timeline-comment-group";
 const { COMMENT, REPLY } = BUTTONS;
+const GITHUB_VALID_PATHNAMES = /^\/.*\/.*\/(?:pull\/\d+(?:\/?|\/files\/?)$|commit|compare\/.*|issues\/\d+|issues\/new)/u;
 
 export default class GitHub {
   constructor(storage) {
-    this._isGithubListenerAdded = false;
-    this._currentUrlPath = window.location.pathname;
     this._storage = storage;
-    this._init();
+    this._currentUrlPath = window.location.pathname;
+    this._buttons = new Map();
+    this._observers = {
+      comments: null,
+      page: null
+    };
+    this._setUpObservers();
+    this._initButtons();
   }
 
-  _init() {
-    if (!this._isGithubListenerAdded) {
-      const commentObserver = new MutationObserver(() => {
-        this._initGitHubButton();
-      });
-      const newCommentObserver = new MutationObserver(() => {
-        commentObserver.disconnect();
-        this._resetGithubCommentObserver(commentObserver);
-        this._initGitHubButton();
-      });
-      const pageObserver = new MutationObserver(() => {
+  _setUpObservers() {
+    if (!this._observers.page) {
+      this._observers.page = new MutationObserver(() => {
         if (window.location.pathname !== this._currentUrlPath) {
           this._currentUrlPath = window.location.pathname;
-          this._initGitHubButton();
-
-          commentObserver.disconnect();
-          this._resetGithubCommentObserver(commentObserver);
-          this._resetGithubNewCommentObserver(newCommentObserver);
+          this._initButtons();
         }
       });
-      pageObserver.observe(document.querySelector("body"), {
-        childList: true
+    }
+
+    if (!this._observers.comments) {
+      this._observers.comments = new MutationObserver(() => {
+        this._initButtons();
       });
-
-      this._resetGithubCommentObserver(commentObserver);
-      this._resetGithubNewCommentObserver(newCommentObserver);
-      this._isGithubListenerAdded = true;
     }
-    this._initGitHubButton();
-  }
 
-  _initGitHubButton() {
-    if (GITHUB_VALID_PATHNAMES.test(window.location.pathname)) {
-      this._createGithubPrettierButtons();
-    }
-  }
-
-  _resetGithubNewCommentObserver(observer) {
-    const content = document.querySelector(".js-discussion");
-    if (content) {
-      observer.disconnect();
-      observer.observe(content, { childList: true, subtree: true });
-    }
-  }
-
-  _resetGithubCommentObserver(observer) {
-    for (const elem of document.querySelectorAll(
-      COMMENT_TIMELINE_GROUP_CLASS
-    )) {
-      observer.observe(elem, {
+    for (const elem of document.querySelectorAll(".timeline-comment-group")) {
+      this._observers.comments.observe(elem, {
         attributes: true,
         childList: true,
         subtree: true
       });
     }
 
-    for (const elem of document.querySelectorAll(JS_DIFF_CONTAINER_CLASS)) {
-      observer.observe(elem, {
+    for (const elem of document.querySelectorAll(
+      ".js-diff-progressive-container"
+    )) {
+      this._observers.comments.observe(elem, {
         childList: true,
         subtree: true
       });
     }
+
+    const content = document.querySelector(".js-discussion");
+
+    if (content) {
+      this._observers.comments.observe(content, {
+        childList: true,
+        subtree: true
+      });
+    }
+
+    for (const elem of document.getElementsByTagName("button")) {
+      if (elem.innerText === REPLY) {
+        this._observers.comments.observe(
+          findWithClass(elem, "inline-comment-form-container"),
+          {
+            attributes: true
+          }
+        );
+      }
+    }
+
+    this._observers.page.observe(document.querySelector("body"), {
+      childList: true
+    });
   }
 
-  _createGithubPrettierButtons() {
+  _disconnectObservers() {
+    Object.values(this._observers).forEach(observer => observer.disconnect());
+  }
+
+  _initButtons() {
+    this._disconnectObservers();
+
+    if (GITHUB_VALID_PATHNAMES.test(window.location.pathname)) {
+      this._createButtons();
+    }
+
+    this._setUpObservers();
+  }
+
+  _createButtons() {
     const BUTTON_STYLE = { float: "left", "margin-right": "10px" };
     const createList = this._seachForGithubButtons();
 
     for (const button of createList) {
       let prettierBtn = button.parentNode.querySelector(".prettier-btn");
-      if (prettierBtn === null) {
-        prettierBtn = renderButton(button.parentNode, {
-          append: true,
-          classes: ["prettier-btn"],
-          refNode: button,
-          style: BUTTON_STYLE
-        });
+
+      if (this._buttons.has(prettierBtn)) {
+        continue;
       }
 
-      const textArea = findWithClass(prettierBtn, "comment-form-textarea");
+      prettierBtn = renderButton(button.parentNode, {
+        append: true,
+        classes: ["prettier-btn"],
+        refNode: button,
+        style: BUTTON_STYLE
+      });
       prettierBtn.addEventListener("click", event => {
         event.preventDefault();
+        const textArea = findWithClass(prettierBtn, "comment-form-textarea");
         const formattedText = prettier.format(textArea.value, {
           parser: "markdown",
           plugins: PRETTIER_PLUGINS,
@@ -108,13 +121,14 @@ export default class GitHub {
         document.execCommand("delete", false, null);
         document.execCommand("insertText", false, formattedText);
       });
+      this._buttons.set(prettierBtn, true);
     }
   }
 
   _seachForGithubButtons() {
-    const buttons = document.getElementsByTagName("button");
     const createList = [];
-    for (const button of buttons) {
+
+    for (const button of document.getElementsByTagName("button")) {
       if (BUTTONS_TO_SEARCH_FOR.includes(button.innerText)) {
         if (
           button.innerText === COMMENT &&
@@ -127,20 +141,11 @@ export default class GitHub {
         ) {
           continue;
         }
+
         createList.push(button);
       }
-      if (button.innerText === REPLY) {
-        const observer = new MutationObserver(() => {
-          this._createGithubPrettierButtons();
-        });
-        observer.observe(
-          findWithClass(button, "inline-comment-form-container"),
-          {
-            attributes: true
-          }
-        );
-      }
     }
+
     return createList;
   }
 }

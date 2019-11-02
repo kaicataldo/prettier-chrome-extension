@@ -14,7 +14,10 @@ export default class Extension {
 
   async init() {
     await this._storage.init();
+    this._initButtons();
+  }
 
+  _initButtons() {
     if (window.location.origin === GITHUB_URL) {
       this._buttons = new GitHub(this._storage);
     }
